@@ -28,9 +28,14 @@ app = FastAPI(
     version="2.0.0"
 )
 
+origins = [
+    "https://glynne-sst-ai-hsiy.vercel.app",  # tu frontend
+    "http://localhost:3000",  # para pruebas locales
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://glynne-sst-ai-hsiy.vercel.app/"],  # ⚠️ Cambiar en producción
+    allow_origins=origins,   # o ["*"] para permitir todos
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
