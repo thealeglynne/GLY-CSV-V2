@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import tempfile
@@ -6,7 +6,6 @@ import uvicorn
 import os
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
-from langchain.prompts import PromptTemplate
 
 # ========================
 # Configuración inicial
@@ -24,7 +23,7 @@ llm = ChatGroq(
 
 app = FastAPI(
     title="API Analizador de CSV",
-    description="Genera un informe ejecutivo narrativo basado en los datos del CSV",
+    description="Genera un informe ejecutivo narrativo basado en los datos del CSV y descripción del usuario",
     version="2.0.0"
 )
 
@@ -35,7 +34,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,   # o ["*"] para permitir todos
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,35 +90,24 @@ def analizar_csv(file_path: str) -> str:
     return "\n".join(reporte)
 
 
-# ========================
-# Prompt ajustado para análisis consultivo
-# ========================
-prompt_analisis = """
-Eres un analista de datos senior con enfoque consultivo. Analiza el siguiente reporte técnico de un dataset y genera un **informe ejecutivo narrativo** de 6–8 párrafos. 
-No te enfoques en explicar cada tabla o estadística, sino en inferir:
+def generar_informe_llm(analisis_tecnico: str, descripcion: str) -> str:
+    """Llama al LLM para generar un informe ejecutivo narrativo considerando la descripción del usuario"""
+    prompt_final = f"""
+Eres un analista de datos senior con enfoque consultivo. Analiza el siguiente dataset y genera un **informe ejecutivo narrativo** de 6–8 párrafos.
+Toma en cuenta la descripción que da el usuario para contextualizar la información.
 
-- Estado general de la empresa.
-- Funcionamiento de procesos o áreas según los datos.
-- Posibles riesgos, oportunidades y áreas de mejora.
-- Recomendaciones prácticas y estratégicas.
+**DESCRIPCIÓN DEL DATASET:**
+{descripcion}
 
 **DATOS TÉCNICOS DEL DATASET:**
-{datos_csv}
+{analisis_tecnico}
 
 **INSTRUCCIONES:**
+- No te enfoques en explicar cada tabla o estadística.
+- Infiera sobre estado general, procesos, riesgos, oportunidades y recomendaciones.
 - Usa un lenguaje claro, profesional y consultivo.
 - Responde únicamente con el informe, sin encabezados.
 """
-
-prompt = PromptTemplate(
-    input_variables=["datos_csv"],
-    template=prompt_analisis.strip(),
-)
-
-
-def generar_informe_llm(analisis_tecnico: str) -> str:
-    """Llama al LLM para generar un informe ejecutivo narrativo"""
-    prompt_final = prompt.format(datos_csv=analisis_tecnico)
     respuesta = llm.invoke(prompt_final)
     return respuesta.content
 
@@ -138,7 +126,14 @@ def separar_columnas_csv(file_path: str):
 # Endpoint principal
 # ========================
 @app.post("/procesar-csv")
-async def procesar_csv(file: UploadFile = File(...)):
+async def procesar_csv(
+    file: UploadFile = File(...),
+    descripcion: str = Form(...)
+):
+    """
+    Recibe un CSV y una descripción corta del dataset.
+    La descripción sirve como contexto adicional para el LLM.
+    """
     try:
         if not file.filename.endswith(".csv"):
             raise HTTPException(status_code=400, detail="Solo se permiten archivos .csv")
@@ -148,8 +143,13 @@ async def procesar_csv(file: UploadFile = File(...)):
             tmp.write(contents)
             tmp_path = tmp.name
 
+        # Analizar CSV
         analisis_tecnico = analizar_csv(tmp_path)
-        informe = generar_informe_llm(analisis_tecnico)
+
+        # Generar informe LLM con contexto
+        informe = generar_informe_llm(analisis_tecnico, descripcion)
+
+        # Separar columnas para el frontend
         tablas = separar_columnas_csv(tmp_path)
 
         os.remove(tmp_path)
